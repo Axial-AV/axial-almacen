@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0c0d0f">
+<title>Axial AV · Almacén</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="html5-qrcode.min.js"></script>
+<style>
+:root{
+  --bg:#111214; --card:#1c1d20; --card2:#25272b; --line:#33363b; --tx:#f3f4f6; --mut:#9ca3af;
+  --blue:#0099E0; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+header{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top));background:#0c0d0f;border-bottom:1px solid var(--line)}
+.logo{font-weight:700;letter-spacing:.06em;font-size:17px}
+.logo b{color:var(--blue)}
+.logo small{display:block;font-weight:500;letter-spacing:.02em;font-size:11px;color:var(--mut)}
+header .sp{flex:1}
+.ib{background:var(--card2);border:1px solid var(--line);border-radius:10px;height:38px;min-width:38px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer}
+.ib.act{background:#0b2f44;border-color:var(--blue)}
+.sync{font-weight:700;min-width:46px}
+.sync.ok{color:#86efac} .sync.run{color:#fcd34d} .sync.err{color:#fca5a5;border-color:#8b2323} .sync.off{color:var(--mut)}
+#banner{display:none;align-items:center;gap:10px;padding:10px 14px;background:#3a2a0b;border-bottom:1px solid #8a5a0b;font-size:14px}
+#banner span{flex:1} #banner .btn{padding:8px 12px}
+main{padding:12px 14px 120px;max-width:640px;margin:0 auto}
+h2{font-size:19px;margin:6px 0 2px}
+h3{font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:18px 0 8px;font-weight:600}
+.mut{color:var(--mut)} .small{font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:8px 0}
+.tap{cursor:pointer} .tap:active{background:var(--card2)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+.big{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 14px;min-height:112px;cursor:pointer;display:flex;flex-direction:column;justify-content:space-between;text-align:left}
+.big:active{transform:scale(.98)}
+.big .ico{font-size:26px} .big .t{font-weight:700;font-size:17px} .big .s{font-size:12.5px;color:var(--mut)}
+.big.pri{background:linear-gradient(160deg,#0a5f8a,#0099E0);border-color:#0099E0} .big.pri .s{color:#d6efff}
+.row{display:flex;align-items:center;gap:8px} .row .grow{flex:1;min-width:0}
+.pill{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--card2);border:1px solid var(--line);white-space:nowrap}
+.p-ok{background:#12351f;border-color:#1f6b3b;color:#86efac}
+.p-blue{background:#0b2f44;border-color:#0b6e9e;color:#7dd3fc}
+.p-warn{background:#3a2a0b;border-color:#8a5a0b;color:#fcd34d}
+.p-err{background:#3b1414;border-color:#8b2323;color:#fca5a5}
+.p-pur{background:#2a1f45;border-color:#5b47a0;color:#c4b5fd}
+.p-dim{opacity:.6}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{font-size:13px;font-weight:600;padding:5px 9px;border-radius:9px;background:var(--card2);border:1px solid var(--line);cursor:pointer;user-select:none}
+.chip.ok{background:#12351f;border-color:#22c55e;color:#bbf7d0}
+.chip.warn{background:#3a2a0b;border-color:#f59e0b;color:#fde68a}
+.chip.err{background:#3b1414;border-color:#ef4444;color:#fecaca}
+.chip.out{opacity:.55}
+.prog{height:6px;background:var(--card2);border-radius:9px;overflow:hidden;margin-top:8px}
+.prog i{display:block;height:100%;background:var(--blue)} .prog i.full{background:var(--ok)} .prog i.over{background:var(--warn)}
+.cnt{font-weight:700;font-variant-numeric:tabular-nums}
+.step{display:flex;align-items:center;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.step button{width:42px;height:40px;background:var(--card2);border:0;font-size:20px;cursor:pointer}
+.step input{width:52px;height:40px;text-align:center;background:var(--bg);border:0;font-weight:700}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);background:var(--card2);border-radius:12px;padding:11px 14px;font-weight:600;cursor:pointer}
+.btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.ok{background:#15803d;border-color:#16a34a;color:#fff}
+.btn.warn{background:#b45309;border-color:#d97706;color:#fff}
+.btn.err{background:#b91c1c;border-color:#dc2626;color:#fff}
+.btn.full{width:100%} .btn:disabled{opacity:.45}
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:15;padding:10px 14px calc(10px + env(safe-area-inset-bottom));background:rgba(12,13,15,.96);border-top:1px solid var(--line)}
+.bar .in{max-width:640px;margin:0 auto;display:flex;gap:8px}
+input[type=text],input[type=search],select,textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+textarea{min-height:70px;resize:vertical}
+label.chk{display:flex;align-items:center;gap:10px;padding:8px 0}
+label.chk input{width:22px;height:22px;accent-color:var(--blue)}
+#scanPanel{background:#000;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin:8px 0}
+#reader{width:100%;min-height:10px} #reader video{object-fit:cover}
+#scanPanel .ctl{display:flex;gap:6px;padding:8px;background:var(--card)}
+#scanPanel .ctl input{flex:1;text-transform:uppercase}
+#scanFile{display:none}
+.flash{animation:fl .6s}
+@keyframes fl{0%{box-shadow:0 0 0 3px var(--c)}100%{box-shadow:0 0 0 0 transparent}}
+#toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:60;max-width:92vw;padding:10px 14px;border-radius:12px;font-weight:600;display:none;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#toast.ok{background:#15803d} #toast.warn{background:#b45309} #toast.err{background:#b91c1c} #toast.info{background:#0b6e9e}
+#modal{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.65);display:none;align-items:flex-end;justify-content:center}
+#modal .box{background:var(--card);border:1px solid var(--line);border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom));width:100%;max-width:640px;max-height:88vh;overflow:auto}
+#modal .box h2{margin-top:0}
+#modal .btns{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}
+.kv div:nth-child(odd){color:var(--mut)}
+.hl{border-left:3px solid var(--warn);padding-left:10px}
+.empty{text-align:center;color:var(--mut);padding:26px 10px}
+.seg{display:flex;gap:6px} .seg label{flex:1} .seg input{display:none}
+.seg span{display:block;text-align:center;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card2);font-weight:600}
+.seg input:checked+span{border-color:var(--blue);background:#0b2f44}
+.seg input.w:checked+span{border-color:var(--warn);background:#3a2a0b}
+.seg input.e:checked+span{border-color:var(--err);background:#3b1414}
+</style>
+</head>
+<body>
+<header>
+  <button class="ib" id="btnHome" title="Inicio">⌂</button>
+  <div class="logo"><b>AXIAL</b> AV<small id="sub">Almacén</small></div>
+  <div class="sp"></div>
+  <button class="ib sync" id="btnSync" title="Sincronización con la hoja">✓</button>
+</header>
+<div id="banner"></div>
+<main>
+  <div id="head"></div>
+  <div id="scanPanel" style="display:none">
+    <div id="reader"></div>
+    <div class="ctl">
+      <input type="text" id="manual" placeholder="ID a mano" autocomplete="off" autocapitalize="characters">
+      <button class="ib" id="btnManual">OK</button>
+      <button class="ib" id="btnCam" title="Encender o apagar la cámara">📷</button>
+      <button class="ib" id="btnFoto" title="Leer el QR desde una foto">🖼</button>
+      <input type="file" id="scanFile" accept="image/*" capture="environment">
+    </div>
+  </div>
+  <div id="view"></div>
+</main>
+<div id="barWrap"></div>
+<div id="toast"></div>
+<div id="modal"><div class="box" id="modalBox"></div></div>
+<script src="app.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>
