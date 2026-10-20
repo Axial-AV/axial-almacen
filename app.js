@@ -4,7 +4,7 @@
  * Todo se trabaja en el móvil (instantáneo) y los cambios se suben a la hoja en segundo plano. */
 
 const CFG = {
-  VERSION: '2.1.0',
+  VERSION: '2.1.1',
   SS_ID: '1sPmmP0mKPehM3T_5UsKKvBpN_fzY7SnxESR6XlC5jDA',
   // API de Apps Script que lee y escribe la hoja con la cuenta de Pol (el móvil no inicia sesión en Google)
   API: 'https://script.google.com/macros/s/AKfycbwH8PzMJ98JMvJAPfm4AAUq2AFFeEi14Cn7N6DH-Iumqgws2WcJ4tWrFeJVK4O2VJkj1g/exec',

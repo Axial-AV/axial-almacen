@@ -1,6 +1,6 @@
 /* Service worker: guarda la app en el móvil para que abra al momento y funcione sin cobertura.
  * Para publicar una versión nueva, cambia el número de CACHE. */
-const CACHE = 'axial-almacen-2.1.0';
+const CACHE = 'axial-almacen-2.1.1';
 const ARCHIVOS = ['./', './index.html', './app.js', './ui.js', './manifest.webmanifest', './html5-qrcode.min.js',
   './icon-192.png', './icon-512.png', './maskable-512.png'];
 
@@ -17,7 +17,7 @@ self.addEventListener('fetch', e => {
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
     try {
-      const red = await Promise.race([fetch(req), new Promise((_, rej) => setTimeout(() => rej(new Error('lenta')), 2500))]);
+      const red = await Promise.race([fetch(req.mode === 'navigate' ? req.url : req, { cache: 'no-cache' }), new Promise((_, rej) => setTimeout(() => rej(new Error('lenta')), 2500))]);
       if (red && red.ok) cache.put(req, red.clone());
       return red;
     } catch (err) {
