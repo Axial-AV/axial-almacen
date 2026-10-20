@@ -4,11 +4,10 @@
  * Todo se trabaja en el móvil (instantáneo) y los cambios se suben a la hoja en segundo plano. */
 
 const CFG = {
-  VERSION: '2.0.0',
+  VERSION: '2.1.0',
   SS_ID: '1sPmmP0mKPehM3T_5UsKKvBpN_fzY7SnxESR6XlC5jDA',
-  CLIENT_ID: '754570405222-690bbn19c7ke8gm4pdaijguuspol226j.apps.googleusercontent.com',
-  SCOPES: 'https://www.googleapis.com/auth/spreadsheets openid email',
-  PERSONAS: { 'polgonzalez13@gmail.com': 'Pol' },
+  // API de Apps Script que lee y escribe la hoja con la cuenta de Pol (el móvil no inicia sesión en Google)
+  API: 'https://script.google.com/macros/s/AKfycbwH8PzMJ98JMvJAPfm4AAUq2AFFeEi14Cn7N6DH-Iumqgws2WcJ4tWrFeJVK4O2VJkj1g/exec',
   UBIC_ALMACEN: 'Trastero El Prat',
   UBIC_EVENTO: 'En evento',
   UBIC_CLIENTE: 'Con el cliente (alquiler)',
@@ -56,7 +55,7 @@ function hoyISO() { const d = new Date(); return d.getFullYear() + '-' + p2(d.ge
 const txt = s => { s = String(s == null ? '' : s); return /^[=+\-@]/.test(s) ? "'" + s : s; };
 const colLetra = i => { let s = ''; i++; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
 const hojaA1 = n => "'" + n.replace(/'/g, "''") + "'";
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 
 let toastT;
 function toast(msg, kind) { const t = $('#toast'); t.className = kind || 'info'; t.textContent = msg; t.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(() => t.style.display = 'none', kind === 'err' ? 4500 : 2200); }
@@ -142,7 +141,7 @@ function leerReservas(evId) {
     material: String(r[c.mat] || ''), cantidad: Number(r[c.cant]) || 0, codigo: norm(r[c.code]), tipo: String(r[c.tipo] || ''), resultado: String(r[c.res] || '') }));
 }
 function ubicaciones() { const t = T('ls'); const c = col(t, 'Ubicación'); return t.rows.map(r => String(r[c] || '').trim()).filter(Boolean); }
-function persona() { const e = (TOK && TOK.email) || store('axial-email') || ''; return CFG.PERSONAS[e] || e || 'Pol'; }
+function persona() { return QUIEN || 'Pol'; }
 
 // Vista calculada de todo (equivale a getDatos de la v1)
 function calcDatos() {
@@ -173,10 +172,9 @@ function encolar(ops) { cola(cola().concat(ops)); guardarCache(); setTimeout(syn
 // Helpers que cambian la copia local y preparan la operación para la hoja
 function setLocal(k, fila, colIdx, val) { const r = T(k).rows[fila]; while (r.length <= colIdx) r.push(''); r[colIdx] = val; }
 function opSet(hoja, clave, columna, val) { return { hoja, clave, columna, val }; }
-function opAppend(hoja, filasLocal, conHora) {
-  // filasLocal: valores tal como quedan en la copia local (fecha = número de serie)
-  const filas = filasLocal.map(r => r.map((v, j) => j === 0 && typeof v === 'number' ? serialTexto(v, conHora) : (typeof v === 'string' ? txt(v) : v)));
-  return { k: 'app', id: uid(), hoja, filas, firma: filasLocal[0].slice(0, 4) };
+function opAppend(hoja, filasLocal) {
+  // Se envían tal como quedan en la copia local (fecha = número de serie); el servidor las convierte
+  return { k: 'app', id: uid(), hoja, filas: filasLocal.map(r => r.slice()) };
 }
 
 // =============== Acciones (validan, cambian lo local y encolan) ===============
@@ -287,108 +285,51 @@ function marcarRevisado(p) {
   return { estado };
 }
 
-// =============== Google: inicio de sesión y API de Sheets ===============
-let TOK = store('axial-tok');
-const tokenOK = () => !!(TOK && TOK.t && TOK.exp > Date.now() + 60000);
-let tokenClient = null, tokenEspera = null;
-function gisListo() { return !!(window.google && google.accounts && google.accounts.oauth2); }
-function initGIS() {
-  if (tokenClient || !gisListo()) return !!tokenClient;
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CFG.CLIENT_ID, scope: CFG.SCOPES,
-    callback: async r => {
-      const w = tokenEspera; tokenEspera = null;
-      if (r.error) { w && w.rej(new Error(r.error_description || r.error)); return; }
-      TOK = { t: r.access_token, exp: Date.now() + (Number(r.expires_in) || 3600) * 1000, email: TOK && TOK.email };
-      try { if (!TOK.email) { const u = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: 'Bearer ' + TOK.t } }).then(x => x.json()); TOK.email = u.email || ''; store('axial-email', TOK.email); } } catch (e) { }
-      store('axial-tok', TOK); w && w.res();
-    },
-    error_callback: err => { const w = tokenEspera; tokenEspera = null; w && w.rej(new Error(err && err.type === 'popup_closed' ? 'Has cerrado la ventana de Google.' : (err && err.message) || 'No se ha podido conectar con Google.')); },
-  });
-  return true;
+// =============== Conexión con la hoja (API de Apps Script) ===============
+// El código de acceso se guarda en el móvil. Se puede poner con un enlace ...#k=CODIGO o escribiéndolo al entrar.
+let CLAVE = store('axial-clave') || '';
+let QUIEN = store('axial-quien') || '';
+(function claveDelEnlace() {
+  const m = /[#&]k=([^&]+)/.exec(location.hash || '');
+  if (m) { CLAVE = decodeURIComponent(m[1]).trim(); store('axial-clave', CLAVE); try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { } }
+})();
+function ponerClave(c) { CLAVE = String(c || '').trim(); store('axial-clave', CLAVE || null); }
+async function api(cuerpo) {
+  if (!CLAVE) { const e = new Error('Falta el código de acceso.'); e.auth = true; throw e; }
+  const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), 60000);
+  let r;
+  try {
+    r = await fetch(CFG.API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ clave: CLAVE }, cuerpo)), signal: ctrl.signal, redirect: 'follow' });
+  } catch (e) { throw new Error(e.name === 'AbortError' ? 'La hoja tarda demasiado en responder.' : 'Sin conexión con la hoja.'); }
+  finally { clearTimeout(t); }
+  if (!r.ok) throw new Error('Error ' + r.status + ' del servidor.');
+  let j; try { j = await r.json(); } catch (e) { throw new Error('Respuesta rara del servidor.'); }
+  if (!j.ok) { const e = new Error(j.error || 'Error del servidor.'); e.auth = !!j.auth; throw e; }
+  if (j.quien && j.quien !== QUIEN) { QUIEN = j.quien; store('axial-quien', QUIEN); }
+  return j;
 }
-function pedirToken() {
-  return new Promise((res, rej) => {
-    if (!initGIS()) return rej(new Error('No se ha cargado el inicio de sesión de Google. ¿Hay conexión?'));
-    tokenEspera = { res, rej };
-    const email = (TOK && TOK.email) || store('axial-email');
-    tokenClient.requestAccessToken(email ? { prompt: '', login_hint: email } : { prompt: 'consent' });
-  });
-}
-async function sheets(metodo, ruta, cuerpo) {
-  if (!tokenOK()) { const e = new Error('Hay que volver a conectar con Google.'); e.auth = true; throw e; }
-  const r = await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + CFG.SS_ID + ruta, {
-    method: metodo, headers: Object.assign({ Authorization: 'Bearer ' + TOK.t }, cuerpo ? { 'Content-Type': 'application/json' } : {}),
-    body: cuerpo ? JSON.stringify(cuerpo) : undefined,
-  });
-  if (r.status === 401) { TOK = Object.assign({}, TOK, { t: null, exp: 0 }); store('axial-tok', TOK); const e = new Error('Hay que volver a conectar con Google.'); e.auth = true; throw e; }
-  if (!r.ok) { let m = 'Error ' + r.status; try { m = (await r.json()).error.message || m; } catch (e) { } const e = new Error(m); e.status = r.status; throw e; }
-  return r.json();
-}
-const qRangos = rs => rs.map(r => 'ranges=' + encodeURIComponent(r)).join('&');
+function guardarDatos(datos) { DB.t = datos; DB.at = Date.now(); guardarCache(); }
 async function descargar() {
-  const ks = Object.keys(RANGOS);
-  const j = await sheets('GET', '/values:batchGet?' + qRangos(ks.map(k => hojaA1(RANGOS[k][0]) + '!' + RANGOS[k][1])) + '&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER');
-  const t = {};
-  ks.forEach((k, i) => {
-    const v = j.valueRanges[i].values || [[]], head = (v[0] || []).map(h => String(h).trim()), w = head.length;
-    t[k] = { head, rows: v.slice(1).map(r => { const a = r.slice(); while (a.length < w) a.push(''); return a; }) };
-  });
+  const j = await api({ ops: [], descargar: true });
   if (cola().length) return false;   // hay cambios locales sin subir: no los piso
-  DB.t = t; DB.at = Date.now(); guardarCache();
-  return true;
+  guardarDatos(j.datos); return true;
 }
 
-// Subir una operación a la hoja
-async function aplicarOp(op) {
-  if (op.k === 'app') {
-    if (op.intentado && await yaEsta(op)) return;           // por si el intento anterior sí llegó
-    op.intentado = true; const c = cola(); if (c[0] && c[0].id === op.id) { c[0].intentado = true; cola(c); }
-    const w = op.filas[0].length;
-    await sheets('POST', '/values/' + encodeURIComponent(hojaA1(op.hoja) + '!A1:' + colLetra(w - 1) + '1') + ':append?valueInputOption=USER_ENTERED&insertDataOption=OVERWRITE', { values: op.filas });
-  } else if (op.k === 'sets') {
-    const hojas = [...new Set(op.sets.map(s => s.hoja))];
-    const j = await sheets('GET', '/values:batchGet?' + qRangos(hojas.map(h => hojaA1(h) + '!A1:ZZ1').concat(hojas.map(h => hojaA1(h) + '!A:A'))) + '&valueRenderOption=UNFORMATTED_VALUE');
-    const info = {};
-    hojas.forEach((h, i) => {
-      const head = ((j.valueRanges[i].values || [[]])[0] || []).map(x => String(x).trim());
-      const filas = {}; (j.valueRanges[hojas.length + i].values || []).forEach((r, n) => { const k = norm(r[0]); if (k && !(k in filas)) filas[k] = n + 1; });
-      info[h] = { head, filas };
-    });
-    const data = [];
-    op.sets.forEach(s => {
-      const I = info[s.hoja]; const f = I.filas[norm(s.clave)];
-      let c = I.head.indexOf(s.columna); if (c < 0) c = I.head.findIndex(h => h.indexOf(s.columna) === 0);
-      if (!f || c < 0) { console.warn('No encuentro', s); return; }
-      data.push({ range: hojaA1(s.hoja) + '!' + colLetra(c) + f, values: [[s.val]] });
-    });
-    if (data.length) await sheets('POST', '/values:batchUpdate', { valueInputOption: 'USER_ENTERED', data });
-  } else if (op.k === 'mantApto') {
-    const j = await sheets('GET', '/values:batchGet?' + qRangos([hojaA1('Mantenimiento') + '!A1:H']) + '&valueRenderOption=UNFORMATTED_VALUE');
-    const v = j.valueRanges[0].values || [[]], head = (v[0] || []).map(x => String(x).trim()), cI = head.indexOf('ID'), cR = head.indexOf('Resultado');
-    const data = [];
-    v.slice(1).forEach((r, n) => { if (norm(r[cI]) === norm(op.equipo) && String(r[cR] || '') === 'Pendiente') data.push({ range: hojaA1('Mantenimiento') + '!' + colLetra(cR) + (n + 2), values: [['Apto']] }); });
-    if (data.length) await sheets('POST', '/values:batchUpdate', { valueInputOption: 'USER_ENTERED', data });
-  }
-}
-async function yaEsta(op) {
-  const j = await sheets('GET', '/values:batchGet?' + qRangos([hojaA1(op.hoja) + '!A1:D']) + '&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER');
-  const v = (j.valueRanges[0].values || []).slice(-200), f = op.firma;
-  return v.some(r => f.every((x, i) => typeof x === 'number' ? Math.abs((Number(r[i]) || 0) - x) < 2e-5 : String(r[i] == null ? '' : r[i]) === String(x)));
-}
-
-// Sincronización
+// Sincronización: sube la cola y baja la hoja actualizada en una sola llamada
 const SYNC = { on: false, err: '', auth: false, t: null };
-async function sync(refrescar) {
+async function sync() {
   if (SYNC.on) return;
   clearTimeout(SYNC.t);
   if (!navigator.onLine) { pintarSync(); return; }
-  if (!tokenOK()) { SYNC.auth = true; pintarSync(); return; }
-  SYNC.on = true; SYNC.auth = false; SYNC.err = ''; pintarSync();
+  if (!CLAVE) { SYNC.auth = true; pintarSync(); return; }
+  SYNC.on = true; SYNC.err = ''; pintarSync();
   try {
-    let q = cola();
-    while (q.length) { await aplicarOp(q[0]); q = cola(); if (q.length) q.shift(); cola(q); pintarSync(); }
-    if (refrescar !== false && await descargar()) refrescarVista();
+    const ops = cola();
+    const j = await api({ ops, descargar: true });
+    const hechas = new Set(j.hechas || []);
+    const resto = cola().filter(op => !hechas.has(op.id));
+    cola(resto); SYNC.auth = false;
+    if (!resto.length && j.datos) { guardarDatos(j.datos); refrescarVista(); }
   } catch (e) {
     if (e.auth) SYNC.auth = true; else { SYNC.err = errMsg(e); SYNC.t = setTimeout(sync, 20000); }
   } finally {
@@ -401,26 +342,30 @@ function pintarSync() {
   const n = cola().length; let cls = 'ok', tx = '✓';
   if (SYNC.on) { cls = 'run'; tx = '⟳' + (n ? ' ' + n : ''); }
   else if (!navigator.onLine) { cls = 'off'; tx = n ? '✈ ' + n : '✈'; }
-  else if (SYNC.auth || !tokenOK()) { cls = 'err'; tx = n ? '⚠ ' + n : '⚠'; }
+  else if (SYNC.auth) { cls = 'err'; tx = n ? '⚠ ' + n : '⚠'; }
   else if (SYNC.err) { cls = 'err'; tx = '! ' + n; }
   else if (n) { cls = 'run'; tx = '⟳ ' + n; }
   b.className = 'ib sync ' + cls; b.textContent = tx;
   const ban = $('#banner');
-  if (SYNC.auth || (!tokenOK() && navigator.onLine)) { ban.style.display = 'flex'; ban.innerHTML = '<span>' + (n ? n + ' cambio' + (n > 1 ? 's' : '') + ' sin subir. ' : '') + 'Conecta con Google para actualizar.</span><button class="btn pri" onclick="conectar()">Conectar</button>'; }
+  if (SYNC.auth && DB.t) { ban.style.display = 'flex'; ban.innerHTML = '<span>' + (n ? n + ' cambio' + (n > 1 ? 's' : '') + ' sin subir. ' : '') + 'El código de acceso no es válido.</span><button class="btn pri" onclick="cambiarClave()">Cambiar</button>'; }
   else ban.style.display = 'none';
 }
-async function conectar() {
-  try { await pedirToken(); SYNC.auth = false; pintarSync(); await sync(); toast('Conectado con la hoja', 'ok'); }
-  catch (e) { toast(errMsg(e), 'err'); }
+async function cambiarClave() {
+  const r = await modal('Código de acceso', '<p class="small mut">Es el código que te da Pol para conectar la app con la hoja.</p><input type="text" name="clave" autocomplete="off" autocapitalize="none" spellcheck="false" value="' + esc(CLAVE) + '">', [{ label: 'Guardar', cls: 'pri', value: true }, { label: 'Cancelar', value: false }]);
+  if (!r.value) return;
+  ponerClave(r.fields.clave); SYNC.auth = false; pintarSync(); await sync();
+  toast(SYNC.auth ? 'Ese código no funciona' : 'Conectado con la hoja', SYNC.auth ? 'err' : 'ok');
 }
 async function tocarSync() {
   const n = cola().length;
-  if (SYNC.auth || !tokenOK()) return conectar();
+  if (SYNC.auth || !CLAVE) return cambiarClave();
   if (!navigator.onLine) return modal('Sin conexión', '<p>' + (n ? 'Tienes <b>' + n + '</b> cambio' + (n > 1 ? 's' : '') + ' guardados en el móvil. Se subirán solos a la hoja cuando vuelva la cobertura.' : 'Todo está subido. Cuando vuelva la cobertura se actualizarán los datos.') + '</p>', [{ label: 'Entendido', value: 1 }]);
   const hace = DB.at ? Math.round((Date.now() - DB.at) / 60000) : null;
   const r = await modal('Sincronización', '<p>' + (n ? '<b>' + n + '</b> cambio' + (n > 1 ? 's' : '') + ' pendientes de subir.' : 'Todo está subido a la hoja.') + '</p>' + (SYNC.err ? '<p class="small" style="color:var(--err)">Último error: ' + esc(SYNC.err) + '</p>' : '') +
-    '<p class="small mut">Datos de la hoja de hace ' + (hace === null ? '—' : hace < 1 ? 'menos de 1 min' : hace + ' min') + '. Versión ' + CFG.VERSION + '.</p>', [{ label: 'Actualizar ahora', cls: 'pri', value: true }, { label: 'Cerrar', value: false }]);
-  if (r.value) { await sync(); toast(cola().length ? 'Quedan cambios por subir' : 'Datos actualizados', cola().length ? 'warn' : 'ok'); }
+    '<p class="small mut">Datos de la hoja de hace ' + (hace === null ? '—' : hace < 1 ? 'menos de 1 min' : hace + ' min') + '. Conectado como ' + esc(persona()) + '. Versión ' + CFG.VERSION + '.</p>',
+    [{ label: 'Actualizar ahora', cls: 'pri', value: 'sync' }, { label: 'Cambiar código de acceso', value: 'clave' }, { label: 'Cerrar', value: '' }]);
+  if (r.value === 'clave') return cambiarClave();
+  if (r.value === 'sync') { await sync(); toast(cola().length ? 'Quedan cambios por subir' : SYNC.err ? 'No se ha podido actualizar' : 'Datos actualizados', cola().length || SYNC.err ? 'warn' : 'ok'); }
 }
 window.addEventListener('online', () => sync());
 window.addEventListener('offline', pintarSync);

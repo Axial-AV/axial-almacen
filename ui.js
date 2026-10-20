@@ -36,6 +36,23 @@ function onCode(raw) {
   SCAN.last = code; SCAN.lastT = now;
   SCAN.handler(code);
 }
+// ID escrito a mano: acepta minúsculas, espacios o un trozo (K210-01, k12.2...) y, si hay varias unidades, deja elegir
+const limpiarID = s => norm(s).replace(/[\s‐-―−_]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+async function onManual(raw) {
+  if (!raw || !String(raw).trim() || SCAN.busy || !SCAN.handler) return;
+  const q = limpiarID(raw);
+  if (!S.d || S.eq[q]) { SCAN.handler(q); return; }
+  const plano = q.replace(/-/g, '');
+  let c = S.d.equipos.filter(e => e.id.includes(q) || e.id.replace(/-/g, '').includes(plano) || norm(e.desc).replace(/\s+/g, '').includes(plano));
+  if (S.view === 'entrada' && S.cur) { const f = c.filter(e => S.cur.fueraEq.includes(e.id)); if (f.length) c = f; }
+  else if (S.view === 'salida') { const f = c.filter(e => ['Disponible', 'Por revisar'].includes(e.estado)); if (f.length) c = f; }
+  if (c.length === 1) { SCAN.handler(c[0].id); return; }
+  if (!c.length || c.length > 30) { SCAN.handler(q); return; }
+  const r = await modal('¿Qué unidad?', '<p class="small mut">Hay ' + c.length + ' que encajan con «' + esc(raw) + '».</p>',
+    c.map(e => ({ label: e.id + (e.estado !== 'Disponible' ? ' · ' + e.estado : ''), value: e.id })).concat([{ label: 'Cancelar', value: '' }]));
+  if (r.value) SCAN.handler(r.value);
+}
+const noExiste = id => 'No encuentro «' + id + '». Escribe el ID como en la etiqueta (ej. LSO-K210-01) o parte de él.';
 async function camStart() {
   scanInit();
   if (!SCAN.qr) { toast('No he podido cargar el lector de QR. Escribe el ID a mano.', 'warn'); return; }
@@ -78,15 +95,17 @@ const VIEWS = {};
 VIEWS.login = () => {
   $('#head').innerHTML = '';
   $('#view').innerHTML = '<div class="card" style="margin-top:30px;text-align:center;padding:26px 18px"><div class="logo" style="font-size:26px"><b>AXIAL</b> AV</div><p class="mut">App de almacén</p>' +
-    '<p>Entra con la cuenta de Google que tiene acceso a la hoja del inventario.</p><button class="btn pri full" onclick="entrar()">Entrar con Google</button>' +
-    '<p class="small mut" style="margin-top:14px">La primera vez Google te avisará de que la app no está verificada: es normal, es tuya.</p></div>';
+    '<p>Escribe el código de acceso para conectar con la hoja del inventario.</p><input type="text" id="claveIn" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Código de acceso" style="margin-bottom:10px">' +
+    '<button class="btn pri full" onclick="entrar()">Entrar</button><p class="small mut" style="margin-top:14px">Solo hay que hacerlo una vez en cada móvil.</p></div>';
 };
 async function entrar() {
   try {
-    await pedirToken();
+    const v = $('#claveIn') ? $('#claveIn').value : '';
+    if (v.trim()) ponerClave(v);
+    if (!CLAVE) { toast('Escribe el código de acceso', 'warn'); return; }
     $('#view').innerHTML = '<div class="empty">Descargando el inventario…</div>';
     await descargar(); rebuild(); go('home'); toast('Listo', 'ok'); pintarSync();
-  } catch (e) { toast(errMsg(e), 'err'); }
+  } catch (e) { toast(errMsg(e), 'err'); if (!DB.t) go('login'); }
 }
 
 // =============== Inicio ===============
@@ -194,7 +213,7 @@ function renderSalida() {
 }
 async function scanSalida(id) {
   const c = S.cur, e = S.eq[id];
-  if (!e) { beep('err'); toast(id + ' no existe en Equipos', 'err'); return; }
+  if (!e) { beep('err'); toast(noExiste(id), 'err'); return; }
   if (c.scanned.includes(id)) { beep('warn'); toast(id + ' ya está escaneado', 'warn'); return; }
   if (c.fueraEq.includes(id)) { beep('warn'); toast(id + ' ya salió para este evento', 'warn'); return; }
   if (e.estado === 'En evento' || e.estado === 'Alquilado') { beep('err'); toast(id + ' está fuera en ' + (e.eventoNombre || e.eventoFuera || 'otro evento'), 'err'); return; }
@@ -294,7 +313,7 @@ function renderEntrada() {
 }
 function scanEntrada(id) {
   const c = S.cur, e = S.eq[id];
-  if (!e) { beep('err'); toast(id + ' no existe en Equipos', 'err'); return; }
+  if (!e) { beep('err'); toast(noExiste(id), 'err'); return; }
   if (!c.fueraEq.includes(id)) { beep('err'); toast(id + (e.eventoFuera ? ' es de otro evento: ' + (e.eventoNombre || e.eventoFuera) : ' no salió en este evento'), 'err'); return; }
   if (c.vuelto[id]) { beep('warn'); toast(id + ' ya está marcado', 'warn'); return; }
   c.vuelto[id] = { cond: 'OK', nota: '' }; guardarBorrador(); beep('ok'); toast('✓ ' + id, 'ok'); renderEntrada(); flash(document.getElementById('m-' + e.modelo), 'var(--ok)');
@@ -348,8 +367,9 @@ VIEWS.consulta = () => {
 function buscar(q, vivo) {
   q = norm(q); const box = $('#res'); if (!box) return;
   if (q.length < 2) { box.innerHTML = ''; return; }
-  const l = S.d.equipos.filter(e => e.id.includes(q) || norm(e.desc).includes(q)).slice(0, 40);
-  if (!vivo && !l.length) { beep('err'); toast(q + ' no existe en Equipos', 'err'); }
+  const qi = limpiarID(q), plano = qi.replace(/-/g, '');
+  const l = S.d.equipos.filter(e => e.id.includes(qi) || e.id.replace(/-/g, '').includes(plano) || norm(e.desc).includes(q) || norm(e.desc).replace(/\s+/g, '').includes(plano)).slice(0, 40);
+  if (!vivo && !l.length) { beep('err'); toast(noExiste(q), 'err'); }
   box.innerHTML = l.map(e => '<div class="card tap" onclick="verFicha(\'' + esc(e.id) + '\')"><div class="row"><div class="grow"><b>' + esc(e.id) + '</b><div class="small mut">' + esc(e.desc) + ' · ' + esc(e.prop) + '</div></div>' + pillEstado(e.estado) + '</div></div>').join('') || (vivo ? '<div class="empty">Sin resultados</div>' : '');
 }
 function verFicha(id) {
@@ -418,7 +438,7 @@ function arrancar() {
   $('#btnHome').onclick = () => { if (S.d) go('home'); };
   $('#btnSync').onclick = () => tocarSync();
   $('#btnCam').onclick = () => { if (SCAN.on) { camStop(); store('axial-cam', false); } else { store('axial-cam', true); camStart(); } };
-  $('#btnManual').onclick = () => { const v = $('#manual').value; $('#manual').value = ''; SCAN.last = ''; onCode(v); };
+  $('#btnManual').onclick = () => { const v = $('#manual').value; $('#manual').value = ''; SCAN.last = ''; onManual(v); };
   $('#manual').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#btnManual').click(); } });
   $('#btnFoto').onclick = () => $('#scanFile').click();
   $('#scanFile').onchange = async e => {
@@ -430,7 +450,7 @@ function arrancar() {
   if (cargarCache()) {
     try { rebuild(); go('home'); } catch (e) { DB.t = null; }
   }
-  if (!DB.t) { go('login'); return; }
+  if (!DB.t) { if (CLAVE) entrar(); else go('login'); return; }
   pintarSync();
   sync();
 }
